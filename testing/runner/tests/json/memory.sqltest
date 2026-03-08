@@ -122,3 +122,28 @@ test json101-8-1 {
 expect {
 		["abc\u0001\u0002\u0003\u0004\u0005\u0006\u0007\b\t\n\u000b\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f !\"#xyz"]
 }
+
+# Regression: JSON subtype lost through GROUP BY causes double-escaping.
+# json_object/json_array/json() output should be embedded as JSON, not
+# re-escaped as a string, when passed to json_group_array with GROUP BY.
+@cross-check-integrity
+test json_group_array_subtype_groupby {
+    CREATE TABLE t(id INTEGER PRIMARY KEY, grp TEXT, key TEXT, val INT);
+    INSERT INTO t VALUES (1, 'a', 'x', 10), (2, 'a', 'y', 20);
+    INSERT INTO t VALUES (3, 'b', 'x', 30), (4, 'b', 'z', 40);
+    SELECT grp, json_group_array(json_object('k', key, 'v', val)) FROM t GROUP BY grp ORDER BY grp;
+}
+expect {
+    a|[{"k":"x","v":10},{"k":"y","v":20}]
+    b|[{"k":"x","v":30},{"k":"z","v":40}]
+}
+
+@cross-check-integrity
+test json_group_array_json_wrapper_groupby {
+    CREATE TABLE t2(id INTEGER PRIMARY KEY, grp TEXT, val TEXT);
+    INSERT INTO t2 VALUES (1, 'a', '[1,2]'), (2, 'a', '[3,4]');
+    SELECT grp, json_group_array(json(val)) FROM t2 GROUP BY grp;
+}
+expect {
+    a|[[1,2],[3,4]]
+}

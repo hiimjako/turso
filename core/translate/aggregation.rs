@@ -11,6 +11,9 @@ use crate::{
     LimboError, Result,
 };
 
+#[cfg(feature = "json")]
+use crate::function::{Func, FuncCtx, JsonFunc};
+
 use super::{
     emitter::{Resolver, TranslateCtx},
     expr::{
@@ -347,14 +350,24 @@ impl<'a> AggArgumentSource<'a> {
                 cursor_id,
                 col_start,
                 dest_reg_start,
-                ..
+                aggregate,
             } => {
-                program.emit_column_or_rowid(
-                    *cursor_id,
-                    *col_start + arg_idx,
-                    dest_reg_start + arg_idx,
-                );
-                Ok(dest_reg_start + arg_idx)
+                let dest = dest_reg_start + arg_idx;
+                program.emit_column_or_rowid(*cursor_id, *col_start + arg_idx, dest);
+                // Restore JSON subtype lost during sorter record serialization.
+                #[cfg(feature = "json")]
+                if expr_produces_json_subtype(&aggregate.args[arg_idx]) {
+                    program.emit_insn(Insn::Function {
+                        constant_mask: 0,
+                        start_reg: dest,
+                        dest,
+                        func: FuncCtx {
+                            func: Func::Json(JsonFunc::Json),
+                            arg_count: 1,
+                        },
+                    });
+                }
+                Ok(dest)
             }
             AggArgumentSource::Register {
                 src_reg_start: start_reg,
@@ -371,6 +384,27 @@ impl<'a> AggArgumentSource<'a> {
                 )
             }
         }
+    }
+}
+
+/// Returns true if the expression is a JSON function call that produces
+/// TextSubtype::Json output (e.g. json_object, json_array, json).
+#[cfg(feature = "json")]
+fn expr_produces_json_subtype(expr: &ast::Expr) -> bool {
+    match expr {
+        ast::Expr::FunctionCall { name, .. } => matches!(
+            name.as_str().to_lowercase().as_str(),
+            "json"
+                | "json_array"
+                | "json_object"
+                | "json_insert"
+                | "json_replace"
+                | "json_set"
+                | "json_remove"
+                | "json_patch"
+                | "json_pretty"
+        ),
+        _ => false,
     }
 }
 
