@@ -139,6 +139,52 @@ expect {
 }
 
 @cross-check-integrity
+test json_group_array_case_when_groupby {
+    CREATE TABLE tc(id INTEGER PRIMARY KEY, grp TEXT, key TEXT, val INT);
+    INSERT INTO tc VALUES (1, 'a', 'x', 10), (2, 'a', 'y', 20);
+    INSERT INTO tc VALUES (3, 'b', 'x', 30), (4, 'b', 'z', 40);
+    SELECT grp, json_group_array(CASE WHEN val > 15 THEN json_object('k', key, 'v', val) ELSE json_object('k', key) END)
+    FROM tc GROUP BY grp ORDER BY grp;
+}
+expect {
+    a|[{"k":"x"},{"k":"y","v":20}]
+    b|[{"k":"x","v":30},{"k":"z","v":40}]
+}
+
+@cross-check-integrity
+test json_group_object_subtype_groupby {
+    CREATE TABLE tgo(id INTEGER PRIMARY KEY, grp TEXT, key TEXT, val INT);
+    INSERT INTO tgo VALUES (1, 'a', 'x', 10), (2, 'a', 'y', 20);
+    INSERT INTO tgo VALUES (3, 'b', 'x', 30), (4, 'b', 'z', 40);
+    SELECT grp, json_group_object(key, json_object('v', val)) FROM tgo GROUP BY grp ORDER BY grp;
+}
+expect {
+    a|{"x":{"v":10},"y":{"v":20}}
+    b|{"x":{"v":30},"z":{"v":40}}
+}
+
+@cross-check-integrity
+test json_group_array_json_array_arg_groupby {
+    CREATE TABLE tja(id INTEGER PRIMARY KEY, grp TEXT, a INT, b INT);
+    INSERT INTO tja VALUES (1, 'a', 1, 2), (2, 'a', 3, 4), (3, 'b', 5, 6);
+    SELECT grp, json_group_array(json_array(a, b)) FROM tja GROUP BY grp ORDER BY grp;
+}
+expect {
+    a|[[1,2],[3,4]]
+    b|[[5,6]]
+}
+
+@cross-check-integrity
+test json_group_array_case_null_else_groupby {
+    CREATE TABLE tcn(id INTEGER PRIMARY KEY, grp TEXT, val INT);
+    INSERT INTO tcn VALUES (1, 'a', 10), (2, 'a', 20), (3, 'a', 5);
+    SELECT grp, json_group_array(CASE WHEN val > 8 THEN json_object('v', val) END) FROM tcn GROUP BY grp;
+}
+expect {
+    a|[{"v":10},{"v":20},null]
+}
+
+@cross-check-integrity
 test json_group_array_json_wrapper_groupby {
     CREATE TABLE t2(id INTEGER PRIMARY KEY, grp TEXT, val TEXT);
     INSERT INTO t2 VALUES (1, 'a', '[1,2]'), (2, 'a', '[3,4]');

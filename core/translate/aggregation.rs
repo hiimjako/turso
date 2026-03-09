@@ -387,23 +387,45 @@ impl<'a> AggArgumentSource<'a> {
     }
 }
 
-/// Returns true if the expression is a JSON function call that produces
-/// TextSubtype::Json output (e.g. json_object, json_array, json).
+/// Returns true if the expression always produces TextSubtype::Json output.
+/// Recurses into CASE/IIF/COALESCE to check that all branches produce JSON.
 #[cfg(feature = "json")]
 fn expr_produces_json_subtype(expr: &ast::Expr) -> bool {
     match expr {
-        ast::Expr::FunctionCall { name, .. } => matches!(
-            name.as_str().to_lowercase().as_str(),
-            "json"
-                | "json_array"
-                | "json_object"
-                | "json_insert"
-                | "json_replace"
-                | "json_set"
-                | "json_remove"
-                | "json_patch"
-                | "json_pretty"
-        ),
+        ast::Expr::FunctionCall { name, args, .. } => {
+            let n = name.as_str().to_lowercase();
+            match n.as_str() {
+                "json" | "json_array" | "json_object" | "json_insert" | "json_replace"
+                | "json_set" | "json_remove" | "json_patch" | "json_pretty" => true,
+                // iif(cond, then, else) — check that value branches produce JSON.
+                "iif" => {
+                    args.len() >= 3
+                        && expr_produces_json_subtype(&args[1])
+                        && expr_produces_json_subtype(&args[2])
+                }
+                // coalesce/ifnull — all alternatives must produce JSON (or be NULL).
+                "coalesce" | "ifnull" => {
+                    !args.is_empty() && args.iter().all(|a| expr_produces_json_subtype(a))
+                }
+                _ => false,
+            }
+        }
+        // CASE WHEN … THEN … ELSE … END — all result branches must produce JSON.
+        // A missing ELSE is implicitly NULL; json(NULL) returns NULL, which is safe.
+        ast::Expr::Case {
+            when_then_pairs,
+            else_expr,
+            ..
+        } => {
+            let all_then = when_then_pairs
+                .iter()
+                .all(|(_, then_expr)| expr_produces_json_subtype(then_expr));
+            let else_ok = match else_expr {
+                Some(e) => expr_produces_json_subtype(e),
+                None => true,
+            };
+            all_then && else_ok
+        }
         _ => false,
     }
 }
